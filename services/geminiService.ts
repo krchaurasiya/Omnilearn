@@ -138,3 +138,42 @@ export const textToSpeech = async (text: string): Promise<AudioBuffer> => {
     const bytes = decodeBase64(base64Audio);
     return decodeAudioData(bytes, audioContext);
 };
+
+export const getTutorResponse = async (
+  lesson: LessonContent,
+  history: { role: string; parts: { text: string }[] }[],
+  message: string
+): Promise<string> => {
+  const ai = getClient();
+  
+  // Initialize chat with system context about the lesson
+  const chat = ai.chats.create({
+    model: "gemini-2.5-flash",
+    history: [
+      {
+        role: "user",
+        parts: [{ text: `SYSTEM CONTEXT: The student is studying a lesson titled "${lesson.title}".
+        
+        LESSON CONTENT:
+        ${lesson.detailedExplanation.substring(0, 20000)}
+        
+        INSTRUCTIONS:
+        You are an expert AI Tutor.
+        - Answer the student's questions based on the lesson content.
+        - If asked to "simplify", provide an ELI5 (Explain Like I'm 5) explanation or a simple analogy.
+        - If asked to "solve math", use rigorous step-by-step math with LaTeX.
+        - ALWAYS use LaTeX for math expressions: $E=mc^2$ (inline) or $$...$$ (block).
+        - Be encouraging, concise, and helpful.
+        ` }],
+      },
+      {
+        role: "model",
+        parts: [{ text: "Understood. I am ready to help the student master this concept." }],
+      },
+      ...history
+    ],
+  });
+
+  const result = await chat.sendMessage({ message });
+  return result.text;
+};

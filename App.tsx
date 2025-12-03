@@ -7,13 +7,15 @@ import {
   Search,
   Loader2,
   Check,
-  ChevronDown
+  ChevronDown,
+  MessageCircle
 } from 'lucide-react';
 import { generateLessonPlan, textToSpeech } from './services/geminiService';
 import { DifficultyLevel, LessonContent, UserSettings } from './types';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import Quiz from './components/Quiz';
 import AudioPlayer from './components/AudioPlayer';
+import ChatInterface from './components/ChatInterface';
 
 const App: React.FC = () => {
   // State
@@ -22,7 +24,7 @@ const App: React.FC = () => {
   const [difficulty, setDifficulty] = useState<DifficultyLevel>(DifficultyLevel.ELEMENTARY);
   const [loading, setLoading] = useState(false);
   const [lesson, setLesson] = useState<LessonContent | null>(null);
-  const [activeTab, setActiveTab] = useState<'learn' | 'quiz'>('learn');
+  const [activeTab, setActiveTab] = useState<'learn' | 'quiz' | 'chat'>('learn');
   
   // Audio State
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
@@ -266,7 +268,7 @@ const App: React.FC = () => {
             
             {/* Sidebar / Navigation (Mobile Top) */}
             <div className="lg:col-span-3 lg:sticky lg:top-24 h-fit space-y-4">
-              <nav className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-visible pb-2 lg:pb-0">
+              <nav className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-visible pb-2 lg:pb-0 no-scrollbar">
                 <button
                   onClick={() => setActiveTab('learn')}
                   className={`flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all whitespace-nowrap ${activeTab === 'learn' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'}`}
@@ -280,6 +282,13 @@ const App: React.FC = () => {
                 >
                   <Check size={20} />
                   Quiz & Practice
+                </button>
+                <button
+                  onClick={() => setActiveTab('chat')}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all whitespace-nowrap ${activeTab === 'chat' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'}`}
+                >
+                  <MessageCircle size={20} />
+                  Ask AI Tutor
                 </button>
               </nav>
 
@@ -357,6 +366,12 @@ const App: React.FC = () => {
                     <div className="mb-8">
                        <Quiz questions={lesson.quiz} />
                     </div>
+                  </div>
+                )}
+
+                {activeTab === 'chat' && (
+                  <div className="animate-in fade-in slide-in-from-bottom-2">
+                     <ChatInterface lesson={lesson} />
                   </div>
                 )}
               </div>
