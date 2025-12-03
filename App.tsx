@@ -8,14 +8,21 @@ import {
   Loader2,
   Check,
   ChevronDown,
-  MessageCircle
+  MessageCircle,
+  History,
+  Map,
+  Download,
+  Trash2,
+  Menu,
+  X
 } from 'lucide-react';
-import { generateLessonPlan, textToSpeech } from './services/geminiService';
-import { DifficultyLevel, LessonContent, UserSettings } from './types';
+import { generateLessonPlan, generateRoadmap, textToSpeech } from './services/geminiService';
+import { DifficultyLevel, LessonContent, Roadmap, UserSettings } from './types';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import Quiz from './components/Quiz';
 import AudioPlayer from './components/AudioPlayer';
 import ChatInterface from './components/ChatInterface';
+import RoadmapView from './components/RoadmapView';
 
 const App: React.FC = () => {
   // State
@@ -23,9 +30,16 @@ const App: React.FC = () => {
   const [concept, setConcept] = useState("");
   const [difficulty, setDifficulty] = useState<DifficultyLevel>(DifficultyLevel.ELEMENTARY);
   const [loading, setLoading] = useState(false);
-  const [lesson, setLesson] = useState<LessonContent | null>(null);
-  const [activeTab, setActiveTab] = useState<'learn' | 'quiz' | 'chat'>('learn');
+  const [loadingRoadmap, setLoadingRoadmap] = useState(false);
   
+  const [lesson, setLesson] = useState<LessonContent | null>(null);
+  const [roadmap, setRoadmap] = useState<Roadmap | null>(null);
+  const [activeTab, setActiveTab] = useState<'learn' | 'quiz' | 'chat' | 'roadmap'>('learn');
+  
+  // History State
+  const [history, setHistory] = useState<LessonContent[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+
   // Audio State
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const [loadingAudio, setLoadingAudio] = useState(false);
@@ -36,26 +50,57 @@ const App: React.FC = () => {
     highContrast: false
   });
   const [showSettings, setShowSettings] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
   
   // Initialize
   useEffect(() => {
     const checkKey = async () => {
-      const win = window as any;
-      if (win.aistudio) {
-        const hasKey = await win.aistudio.hasSelectedApiKey();
+      if (window.aistudio) {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
         setApiKeyReady(hasKey);
       }
     };
     checkKey();
+    
+    // Load History
+    const savedHistory = localStorage.getItem('omniLearn_history');
+    if (savedHistory) {
+      try {
+        setHistory(JSON.parse(savedHistory));
+      } catch (e) {
+        console.error("Failed to parse history", e);
+      }
+    }
   }, []);
 
   const handleApiKeySelection = async () => {
-    const win = window as any;
-    if (win.aistudio) {
-      await win.aistudio.openSelectKey();
+    if (window.aistudio) {
+      await window.aistudio.openSelectKey();
       // Assume success as per instructions
       setApiKeyReady(true);
     }
+  };
+
+  const saveToHistory = (newLesson: LessonContent) => {
+    const updatedHistory = [newLesson, ...history].slice(0, 50); // Keep last 50
+    setHistory(updatedHistory);
+    localStorage.setItem('omniLearn_history', JSON.stringify(updatedHistory));
+  };
+
+  const deleteFromHistory = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = history.filter(h => h.id !== id);
+    setHistory(updated);
+    localStorage.setItem('omniLearn_history', JSON.stringify(updated));
+  };
+
+  const loadLesson = (savedLesson: LessonContent) => {
+    setLesson(savedLesson);
+    setConcept(savedLesson.title); // Update search box to match
+    setActiveTab('learn');
+    setShowHistory(false);
+    setAudioBuffer(null);
+    setRoadmap(null);
   };
 
   const isQuotaError = (error: any): boolean => {
@@ -65,18 +110,20 @@ const App: React.FC = () => {
     return code === 429 || msg.includes('429') || msg.includes('Quota exceeded') || msg.includes('RESOURCE_EXHAUSTED') || errString.includes('RESOURCE_EXHAUSTED');
   };
 
-  const handleGenerateLesson = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleGenerateLesson = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!concept.trim()) return;
 
     setLoading(true);
     setLesson(null);
     setAudioBuffer(null);
+    setRoadmap(null);
     setActiveTab('learn');
 
     try {
       const data = await generateLessonPlan(concept, difficulty);
       setLesson(data);
+      saveToHistory(data);
     } catch (error: any) {
       console.error(error);
       if (isQuotaError(error)) {
@@ -86,6 +133,30 @@ const App: React.FC = () => {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGenerateRoadmap = async () => {
+    if (!concept.trim()) return;
+    
+    setLoadingRoadmap(true);
+    setLesson(null);
+    setRoadmap(null);
+    setAudioBuffer(null);
+    setActiveTab('roadmap');
+
+    try {
+      const data = await generateRoadmap(concept);
+      setRoadmap(data);
+    } catch (error: any) {
+      console.error(error);
+      if (isQuotaError(error)) {
+        alert("Quota exceeded for roadmap generation.");
+      } else {
+        alert("Failed to generate roadmap.");
+      }
+    } finally {
+      setLoadingRoadmap(false);
     }
   };
 
@@ -106,6 +177,34 @@ const App: React.FC = () => {
       }
     } finally {
       setLoadingAudio(false);
+    }
+  };
+
+  const handleDownloadPDF = async () => {
+    const elementId = roadmap ? 'roadmap-container' : 'lesson-container';
+    const element = document.getElementById(elementId);
+    
+    if (!element) return;
+    
+    setGeneratingPdf(true);
+    const title = lesson?.title || roadmap?.concept || 'document';
+    
+    const opt = {
+      margin: 0.5,
+      filename: `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
+      jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+    };
+
+    try {
+      await window.html2pdf().set(opt).from(element).save();
+    } catch (e) {
+      console.error("PDF Generation failed:", e);
+      alert("Failed to generate PDF. Falling back to print mode.");
+      window.print();
+    } finally {
+      setGeneratingPdf(false);
     }
   };
 
@@ -149,16 +248,25 @@ const App: React.FC = () => {
     <div className={`min-h-screen ${settings.highContrast ? 'bg-white text-black' : 'bg-slate-50 text-slate-900'} transition-colors duration-300 font-sans`}>
       
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200">
+      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200 no-print">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2 cursor-pointer" onClick={() => {setLesson(null); setConcept(""); setAudioBuffer(null);}}>
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => {setLesson(null); setRoadmap(null); setConcept(""); setAudioBuffer(null);}}>
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
               <BookOpen className="text-white" size={20} />
             </div>
             <span className="font-bold text-xl tracking-tight text-slate-900">OmniLearn</span>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowHistory(true)}
+              className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 flex items-center gap-2"
+              title="My Library"
+            >
+              <History size={20} />
+              <span className="hidden sm:inline font-medium text-sm">Library</span>
+            </button>
+            <div className="w-px h-6 bg-slate-200"></div>
             <button 
               onClick={() => setShowSettings(!showSettings)}
               className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600"
@@ -192,11 +300,60 @@ const App: React.FC = () => {
         )}
       </header>
 
+      {/* History Sidebar */}
+      {showHistory && (
+        <>
+          <div className="fixed inset-0 bg-black/20 z-50 backdrop-blur-sm transition-opacity no-print" onClick={() => setShowHistory(false)}></div>
+          <div className="fixed inset-y-0 right-0 w-full sm:w-96 bg-white shadow-2xl z-50 transform transition-transform duration-300 animate-in slide-in-from-right no-print">
+            <div className="h-full flex flex-col">
+              <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <h3 className="font-bold text-xl text-slate-800 flex items-center gap-2">
+                  <History className="text-indigo-600" size={24} />
+                  My Library
+                </h3>
+                <button onClick={() => setShowHistory(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                {history.length === 0 ? (
+                  <div className="text-center text-slate-500 mt-10">
+                    <BookOpen size={48} className="mx-auto mb-4 opacity-20" />
+                    <p>No lessons saved yet.</p>
+                    <p className="text-sm">Generate a lesson to see it here.</p>
+                  </div>
+                ) : (
+                  history.map((h) => (
+                    <div 
+                      key={h.id} 
+                      onClick={() => loadLesson(h)}
+                      className="group p-4 rounded-xl border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all cursor-pointer bg-white relative"
+                    >
+                      <h4 className="font-bold text-slate-900 mb-1 group-hover:text-indigo-600 transition-colors">{h.title}</h4>
+                      <p className="text-xs text-slate-500 mb-2 line-clamp-2">{h.summary}</p>
+                      <div className="flex justify-between items-center text-xs text-slate-400">
+                        <span>{new Date(h.timestamp).toLocaleDateString()}</span>
+                        <button 
+                          onClick={(e) => deleteFromHistory(h.id, e)}
+                          className="p-1.5 hover:bg-red-50 hover:text-red-500 rounded-full transition-colors opacity-0 group-hover:opacity-100"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
         {/* Input Section */}
-        {!lesson && (
+        {(!lesson && !roadmap) && (
           <div className="max-w-2xl mx-auto mt-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
             <div className="text-center mb-10">
               <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 mb-4 tracking-tight">
@@ -240,25 +397,71 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg hover:shadow-indigo-500/25 transition-all transform hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-wait flex items-center justify-center gap-2"
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 className="animate-spin" size={24} />
-                      Designing Lesson...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles size={24} />
-                      Generate Lesson
-                    </>
-                  )}
-                </button>
+                <div className="grid grid-cols-2 gap-4">
+                  <button
+                    type="submit"
+                    disabled={loading || loadingRoadmap}
+                    className="py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg hover:shadow-indigo-500/25 transition-all transform hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-wait flex items-center justify-center gap-2"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="animate-spin" size={24} />
+                        Designing...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={24} />
+                        Generate Lesson
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGenerateRoadmap}
+                    disabled={loading || loadingRoadmap}
+                    className="py-4 bg-white border-2 border-slate-200 text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 font-bold rounded-xl transition-all transform hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-wait flex items-center justify-center gap-2"
+                  >
+                    {loadingRoadmap ? (
+                       <>
+                         <Loader2 className="animate-spin" size={24} />
+                         Planning...
+                       </>
+                    ) : (
+                       <>
+                         <Map size={24} />
+                         Generate Roadmap
+                       </>
+                    )}
+                  </button>
+                </div>
               </form>
             </div>
+          </div>
+        )}
+
+        {/* Roadmap Display */}
+        {roadmap && !lesson && (
+          <div id="roadmap-container" className="max-w-4xl mx-auto">
+             <div className="mb-6 flex items-center justify-between no-print" data-html2canvas-ignore="true">
+               <button onClick={() => setRoadmap(null)} className="flex items-center gap-1 text-slate-500 hover:text-slate-800 transition-colors">
+                 <X size={16} /> Back
+               </button>
+               <button
+                 onClick={handleDownloadPDF}
+                 disabled={generatingPdf}
+                 className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-lg font-medium transition-colors"
+               >
+                 {generatingPdf ? <Loader2 className="animate-spin" size={18} /> : <Download size={18} />}
+                 {generatingPdf ? "Saving..." : "Download Roadmap PDF"}
+               </button>
+             </div>
+             <RoadmapView 
+                roadmap={roadmap} 
+                onTopicClick={(topic) => {
+                  setConcept(topic);
+                  handleGenerateLesson();
+                }} 
+             />
           </div>
         )}
 
@@ -267,7 +470,7 @@ const App: React.FC = () => {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-in fade-in duration-500">
             
             {/* Sidebar / Navigation (Mobile Top) */}
-            <div className="lg:col-span-3 lg:sticky lg:top-24 h-fit space-y-4">
+            <div className="lg:col-span-3 lg:sticky lg:top-24 h-fit space-y-4 no-print">
               <nav className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-visible pb-2 lg:pb-0 no-scrollbar">
                 <button
                   onClick={() => setActiveTab('learn')}
@@ -303,18 +506,37 @@ const App: React.FC = () => {
                   ))}
                 </ul>
               </div>
+
+              {/* Action Buttons */}
+               <div className="space-y-2">
+                 <button
+                   onClick={handleDownloadPDF}
+                   disabled={generatingPdf}
+                   className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-xl font-medium transition-colors"
+                 >
+                   {generatingPdf ? <Loader2 className="animate-spin" size={18} /> : <Download size={18} />}
+                   {generatingPdf ? "Generating PDF..." : "Download Notes"}
+                 </button>
+                 <button
+                   onClick={() => { setConcept(lesson.title); handleGenerateRoadmap(); }}
+                   className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-xl font-medium transition-colors"
+                 >
+                   <Map size={18} />
+                   View Roadmap
+                 </button>
+               </div>
             </div>
 
             {/* Main Content Area */}
-            <div className="lg:col-span-9 space-y-8">
+            <div id="lesson-container" className="lg:col-span-9 space-y-8 print:col-span-12">
               
               {/* Header Card */}
-              <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 opacity-50 pointer-events-none"></div>
+              <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden print:border-none print:shadow-none">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 opacity-50 pointer-events-none no-print" data-html2canvas-ignore="true"></div>
                 
                 <div className="flex flex-col sm:flex-row justify-between items-start gap-4 relative z-10">
                   <div className="flex-1">
-                    <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-bold uppercase tracking-wider rounded-full mb-3">
+                    <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-bold uppercase tracking-wider rounded-full mb-3 no-print" data-html2canvas-ignore="true">
                       {difficulty}
                     </span>
                     <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-4">{lesson.title}</h1>
@@ -322,7 +544,7 @@ const App: React.FC = () => {
                   </div>
                   
                   {/* Audio Controls */}
-                  <div className="flex-shrink-0 mt-4 sm:mt-0 w-full sm:w-auto">
+                  <div className="flex-shrink-0 mt-4 sm:mt-0 w-full sm:w-auto no-print" data-html2canvas-ignore="true">
                     {audioBuffer ? (
                        <AudioPlayer audioBuffer={audioBuffer} />
                     ) : (
@@ -346,9 +568,9 @@ const App: React.FC = () => {
               {/* Dynamic Content Based on Tab */}
               <div className="min-h-[400px]">
                 {activeTab === 'learn' && (
-                  <div className={`bg-white p-8 rounded-2xl shadow-sm border border-slate-200 animate-in fade-in slide-in-from-bottom-2 ${getTextSizeClass()}`}>
+                  <div className={`bg-white p-8 rounded-2xl shadow-sm border border-slate-200 animate-in fade-in slide-in-from-bottom-2 ${getTextSizeClass()} print:shadow-none print:border-none print:p-0`}>
                     <div className="prose prose-indigo max-w-none">
-                      <div className="mb-8 p-6 bg-amber-50 rounded-xl border border-amber-100">
+                      <div className="mb-8 p-6 bg-amber-50 rounded-xl border border-amber-100 no-print">
                         <h3 className="flex items-center gap-2 font-bold text-amber-900 mb-2">
                           <Sparkles size={20} className="text-amber-500" />
                           Simple Analogy
@@ -362,7 +584,7 @@ const App: React.FC = () => {
                 )}
 
                 {activeTab === 'quiz' && (
-                  <div className="animate-in fade-in slide-in-from-bottom-2">
+                  <div className="animate-in fade-in slide-in-from-bottom-2 no-print">
                     <div className="mb-8">
                        <Quiz questions={lesson.quiz} />
                     </div>
@@ -370,7 +592,7 @@ const App: React.FC = () => {
                 )}
 
                 {activeTab === 'chat' && (
-                  <div className="animate-in fade-in slide-in-from-bottom-2">
+                  <div className="animate-in fade-in slide-in-from-bottom-2 no-print">
                      <ChatInterface lesson={lesson} />
                   </div>
                 )}

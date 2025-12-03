@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
-import { DifficultyLevel, LessonContent } from "../types";
+import { DifficultyLevel, LessonContent, Roadmap } from "../types";
 
 // Helper to get client with current key
 const getClient = () => {
@@ -85,8 +85,68 @@ export const generateLessonPlan = async (
     throw new Error("Failed to generate lesson content");
   }
 
-  return JSON.parse(response.text) as LessonContent;
+  const data = JSON.parse(response.text);
+  
+  // Add metadata for history
+  return {
+    ...data,
+    id: crypto.randomUUID(),
+    timestamp: Date.now()
+  } as LessonContent;
 };
+
+export const generateRoadmap = async (concept: string): Promise<Roadmap> => {
+  const ai = getClient();
+  
+  const prompt = `Create a detailed learning roadmap for mastering "${concept}". 
+  Break it down into logical, sequential steps starting from the basics and moving to advanced topics.
+  
+  For each step, provide:
+  - A title
+  - A brief description
+  - Estimated time to master
+  - A list of sub-topics/concepts to learn in that step.
+  `;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          concept: { type: Type.STRING },
+          description: { type: Type.STRING },
+          steps: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                stepNumber: { type: Type.INTEGER },
+                title: { type: Type.STRING },
+                description: { type: Type.STRING },
+                estimatedTime: { type: Type.STRING },
+                topics: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING }
+                }
+              },
+              required: ["stepNumber", "title", "description", "estimatedTime", "topics"]
+            }
+          }
+        },
+        required: ["concept", "description", "steps"]
+      }
+    }
+  });
+
+  if (!response.text) {
+    throw new Error("Failed to generate roadmap");
+  }
+
+  return JSON.parse(response.text) as Roadmap;
+}
 
 export const textToSpeech = async (text: string): Promise<AudioBuffer> => {
     const ai = getClient();

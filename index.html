@@ -8,6 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <style>
       body {
         font-family: 'Inter', sans-serif;
@@ -28,6 +29,37 @@
         background: #a1a1aa; 
       }
       .katex { font-size: 1.1em; }
+
+      @media print {
+        header, nav, form, .no-print, button {
+          display: none !important;
+        }
+        body {
+          background: white;
+          color: black;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        #root {
+          margin: 0;
+          padding: 0;
+        }
+        .prose {
+          max-width: 100% !important;
+        }
+        .print-only-title {
+          display: block !important;
+        }
+        /* Remove shadows but keep borders for structure */
+        .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl {
+          box-shadow: none !important;
+        }
+        /* Ensure background colors print for the roadmap timeline */
+        * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+        }
+      }
     </style>
   <script type="importmap">
 {
